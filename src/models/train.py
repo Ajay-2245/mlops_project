@@ -1,11 +1,11 @@
 """
 src/models/train.py
 ────────────────────
-Trains the fraud-detection classifier with MLflow experiment tracking.
+MLflow 3.x compatible training script.
 
-FIXES:
-  - Removed use_label_encoder=False (removed in XGBoost >= 1.6)
-  - Removed duplicate mlflow.log_artifact for model.pkl (already logged by log_model)
+In MLflow 3.x, log_model() stores models in the new LoggedModel system
+(visible in Models / Model Registry sections), NOT in the run Artifacts tab.
+To show the model in Artifacts tab we also log it via log_artifact().
 """
 
 import json
@@ -17,6 +17,7 @@ from pathlib import Path
 import mlflow
 import mlflow.sklearn
 import numpy as np
+import pandas as pd
 import yaml
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -56,9 +57,20 @@ def load_split(name: str) -> np.ndarray:
         return pickle.load(f)
 
 
+def load_preprocessor():
+    with open(PROCESSED / "preprocessor.pkl", "rb") as f:
+        return pickle.load(f)
+
+
+def get_feature_names(preprocessor) -> list:
+    try:
+        return list(preprocessor.get_feature_names_out())
+    except Exception:
+        return []
+
+
 def build_model(cfg: dict):
     algo = cfg.get("algorithm", "random_forest")
-
     if algo == "random_forest":
         return RandomForestClassifier(
             n_estimators=cfg["n_estimators"],
@@ -71,7 +83,7 @@ def build_model(cfg: dict):
         )
     elif algo == "xgboost":
         if not XGBOOST_AVAILABLE:
-            raise ImportError("xgboost is not installed. Run: pip install xgboost")
+            raise ImportError("xgboost is not installed.")
         return XGBClassifier(
             n_estimators=cfg["n_estimators"],
             max_depth=cfg["max_depth"],
@@ -111,7 +123,11 @@ def main() -> None:
     y_train = load_split("y_train")
     X_val = load_split("X_val")
     y_val = load_split("y_val")
+    preprocessor = load_preprocessor()
+    feature_names = get_feature_names(preprocessor)
+
     logger.info("Data loaded — train: %s | val: %s", X_train.shape, X_val.shape)
+    logger.info("Feature names resolved: %d features", len(feature_names))
 
     mlflow.set_tracking_uri(mlflow_cfg["tracking_uri"])
     mlflow.set_experiment(mlflow_cfg["experiment_name"])
@@ -138,7 +154,6 @@ def main() -> None:
         train_metrics = evaluate_split(model, X_train, y_train, threshold, "train")
         val_metrics = evaluate_split(model, X_val, y_val, threshold, "val")
         all_metrics = {**train_metrics, **val_metrics}
-
         mlflow.log_metrics(all_metrics)
         logger.info(
             "Val F1: %.4f | Val ROC-AUC: %.4f",
@@ -148,26 +163,40 @@ def main() -> None:
         with open(PROCESSED / "train_metrics.json", "w") as f:
             json.dump(all_metrics, f, indent=2)
 
-        if hasattr(model, "feature_importances_"):
+        # ── Feature importances ──────────────────────────────────────────────
+        if hasattr(model, "feature_importances_") and feature_names:
+            importance_df = pd.DataFrame({
+                "feature": feature_names,
+                "importance": model.feature_importances_,
+            }).sort_values("importance", ascending=False)
+
             mlflow.log_text(
-                "\n".join(
-                    f"feature_{i}: {v:.6f}"
-                    for i, v in enumerate(model.feature_importances_)
-                ),
+                importance_df.head(20).to_string(index=False),
                 "feature_importances.txt",
             )
+            importance_df.to_csv(PROCESSED / "feature_importances.csv", index=False)
+            logger.info("Top 5 features: %s", importance_df.head(5)["feature"].tolist())
 
-        # FIX: log_model already stores the model; removed duplicate log_artifact call
-        mlflow.sklearn.log_model(
-            model,
-            artifact_path="model",
-            registered_model_name=mlflow_cfg["registered_model_name"],
-        )
-        logger.info("Model logged to MLflow and registered.")
-
-        # Persist locally for DVC pipeline
-        with open(PROCESSED / "model.pkl", "wb") as f:
+        # ── Persist model locally ────────────────────────────────────────────
+        model_path = PROCESSED / "model.pkl"
+        with open(model_path, "wb") as f:
             pickle.dump(model, f)
+
+        # ── Artifacts tab: log pkl file directly ────────────────────────────
+        # In MLflow 3.x, log_model goes to Models section NOT Artifacts tab.
+        # log_artifact puts the file in the Artifacts tab.
+        mlflow.log_artifact(str(model_path), artifact_path="model")
+        logger.info("model.pkl logged to run Artifacts tab under 'model/' folder.")
+
+        # ── Models section + Model Registry: log_model with name= ───────────
+        # This is what populates the Models / Model Registry sections in MLflow 3.x.
+        mlflow.sklearn.log_model(
+            sk_model=model,
+            name="model",
+            registered_model_name=mlflow_cfg["registered_model_name"],
+            input_example=X_train[:5],
+        )
+        logger.info("Model logged to Models section and registered in Model Registry.")
 
     logger.info("Training pipeline complete. Run ID: %s", run.info.run_id)
 

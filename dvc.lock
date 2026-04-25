@@ -1,0 +1,224 @@
+schema: '2.0'
+stages:
+  ingest:
+    cmd: python src/data/ingest.py
+    deps:
+    - path: data/raw/insurance_fraud.xlsx
+      hash: md5
+      md5: 6491fea2e9f65d77302e31adc78eef66
+      size: 233258
+    - path: src/data/ingest.py
+      hash: md5
+      md5: 40a34f978f00ad89534853b704431ec4
+      size: 2278
+    params:
+      params.yaml:
+        data.raw_path: data/raw/insurance_fraud.xlsx
+  validate:
+    cmd: python src/data/validate.py
+    deps:
+    - path: data/raw/insurance_fraud.xlsx
+      hash: md5
+      md5: 6491fea2e9f65d77302e31adc78eef66
+      size: 233258
+    - path: src/data/validate.py
+      hash: md5
+      md5: 13a617c52c1315dbed2c65adfe4404c8
+      size: 4910
+    params:
+      params.yaml:
+        data.raw_path: data/raw/insurance_fraud.xlsx
+        features.target_column: fraud_reported
+    outs:
+    - path: data/processed/validation_report.json
+      hash: md5
+      md5: 295ec9b7090a9be0a396160e473289f4
+      size: 1328
+  preprocess:
+    cmd: python src/data/preprocess.py
+    deps:
+    - path: data/processed/validation_report.json
+      hash: md5
+      md5: 295ec9b7090a9be0a396160e473289f4
+      size: 1328
+    - path: data/raw/insurance_fraud.xlsx
+      hash: md5
+      md5: 6491fea2e9f65d77302e31adc78eef66
+      size: 233258
+    - path: src/data/preprocess.py
+      hash: md5
+      md5: ac231a3fb7feb65fe5736e00c6de86d1
+      size: 4423
+    - path: src/features/engineer.py
+      hash: md5
+      md5: 9623f1781c7cb13ff64a9841b4678948
+      size: 4237
+    params:
+      params.yaml:
+        data:
+          raw_path: data/raw/insurance_fraud.xlsx
+          processed_path: data/processed/
+          test_size: 0.2
+          val_size: 0.1
+          random_state: 42
+        features:
+          target_column: fraud_reported
+          drop_columns:
+          - policy_number
+          - policy_bind_date
+          - incident_date
+          - incident_location
+          - auto_model
+          - insured_zip
+          categorical_columns:
+          - policy_state
+          - policy_csl
+          - insured_sex
+          - insured_education_level
+          - insured_occupation
+          - insured_hobbies
+          - insured_relationship
+          - incident_type
+          - collision_type
+          - incident_severity
+          - authorities_contacted
+          - incident_state
+          - incident_city
+          - property_damage
+          - police_report_available
+          - auto_make
+          numerical_columns:
+          - months_as_customer
+          - age
+          - policy_deductable
+          - policy_annual_premium
+          - umbrella_limit
+          - capital-gains
+          - capital-loss
+          - incident_hour_of_the_day
+          - number_of_vehicles_involved
+          - bodily_injuries
+          - witnesses
+          - total_claim_amount
+          - injury_claim
+          - property_claim
+          - vehicle_claim
+          - auto_year
+    outs:
+    - path: data/processed/X_test.pkl
+      hash: md5
+      md5: 60e6a1d70f67258a1acc35aaf7ea1a45
+      size: 206562
+    - path: data/processed/X_train.pkl
+      hash: md5
+      md5: c2016a0866746907ba5012aa29e17015
+      size: 722563
+    - path: data/processed/X_val.pkl
+      hash: md5
+      md5: 578e0bc237fbff33e29682058bae3ec8
+      size: 103362
+    - path: data/processed/baseline_stats.json
+      hash: md5
+      md5: f2f9510fe5562a461771c92408da9eef
+      size: 12176
+    - path: data/processed/preprocessor.pkl
+      hash: md5
+      md5: 454ecdebe2f9d5a9121abda243d27e06
+      size: 6212
+    - path: data/processed/y_test.pkl
+      hash: md5
+      md5: e1f3003a0435e21bf88f1790bf295bbc
+      size: 1751
+    - path: data/processed/y_train.pkl
+      hash: md5
+      md5: faae2b12c36eb384ba29eb53584e67d5
+      size: 5752
+    - path: data/processed/y_val.pkl
+      hash: md5
+      md5: 7bebf604bccd6a05a5907f43f3733c90
+      size: 951
+  train:
+    cmd: python src/models/train.py
+    deps:
+    - path: data/processed/X_train.pkl
+      hash: md5
+      md5: c2016a0866746907ba5012aa29e17015
+      size: 722563
+    - path: data/processed/X_val.pkl
+      hash: md5
+      md5: 578e0bc237fbff33e29682058bae3ec8
+      size: 103362
+    - path: data/processed/preprocessor.pkl
+      hash: md5
+      md5: 454ecdebe2f9d5a9121abda243d27e06
+      size: 6212
+    - path: data/processed/y_train.pkl
+      hash: md5
+      md5: faae2b12c36eb384ba29eb53584e67d5
+      size: 5752
+    - path: data/processed/y_val.pkl
+      hash: md5
+      md5: 7bebf604bccd6a05a5907f43f3733c90
+      size: 951
+    - path: src/models/train.py
+      hash: md5
+      md5: ec3e1f64cde74b8986f86785d3dd4076
+      size: 7298
+    params:
+      params.yaml:
+        mlflow:
+          experiment_name: insurance_fraud_detection
+          registered_model_name: insurance_fraud_model
+          tracking_uri: http://localhost:5000
+        model:
+          algorithm: random_forest
+          n_estimators: 200
+          max_depth: 10
+          min_samples_split: 5
+          min_samples_leaf: 2
+          class_weight: balanced
+          threshold: 0.4
+    outs:
+    - path: data/processed/model.pkl
+      hash: md5
+      md5: 11570f263d4ad347303dcb801e7b2397
+      size: 1993493
+    - path: data/processed/train_metrics.json
+      hash: md5
+      md5: a55dc85d8a9bfedcb0cd87f785219c9a
+      size: 259
+  evaluate:
+    cmd: python src/models/evaluate.py
+    deps:
+    - path: data/processed/X_test.pkl
+      hash: md5
+      md5: 60e6a1d70f67258a1acc35aaf7ea1a45
+      size: 206562
+    - path: data/processed/model.pkl
+      hash: md5
+      md5: 11570f263d4ad347303dcb801e7b2397
+      size: 1993493
+    - path: data/processed/y_test.pkl
+      hash: md5
+      md5: e1f3003a0435e21bf88f1790bf295bbc
+      size: 1751
+    - path: src/models/evaluate.py
+      hash: md5
+      md5: 9bb0fd0927707ed478d0a2b76768a384
+      size: 4364
+    params:
+      params.yaml:
+        mlflow:
+          experiment_name: insurance_fraud_detection
+          registered_model_name: insurance_fraud_model
+          tracking_uri: http://localhost:5000
+        model.threshold: 0.4
+    outs:
+    - path: data/processed/confusion_matrix.csv
+      hash: md5
+      md5: fefe1f5862db981adac9e7640ae7dc3b
+      size: 108
+    - path: data/processed/eval_metrics.json
+      hash: md5
+      md5: 399327ecdeacb95a5d88f0464608c946
+      size: 222
