@@ -1,0 +1,56 @@
+{
+  "title": "Insurance Fraud Detection — MLOps Dashboard",
+  "uid": "fraud-mlops",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Total Predictions",
+      "gridPos": {"x": 0, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "sum(fraud_predictions_total)", "legendFormat": "Total"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 2, "type": "stat", "title": "Fraud Detected",
+      "gridPos": {"x": 4, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "sum(fraud_predictions_total{result='fraud'})", "legendFormat": "Fraud"}],
+      "fieldConfig": {"defaults": {"color": {"mode": "fixed", "fixedColor": "red"}}}
+    },
+    {
+      "id": 3, "type": "stat", "title": "Model Loaded",
+      "gridPos": {"x": 8, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "fraud_model_loaded", "legendFormat": "Model"}]
+    },
+    {
+      "id": 4, "type": "stat", "title": "Avg Latency (ms)",
+      "gridPos": {"x": 12, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "rate(fraud_api_request_latency_seconds_sum[5m]) / rate(fraud_api_request_latency_seconds_count[5m]) * 1000", "legendFormat": "ms"}]
+    },
+    {
+      "id": 5, "type": "stat", "title": "Error Rate",
+      "gridPos": {"x": 16, "y": 0, "w": 4, "h": 4},
+      "targets": [{"expr": "rate(fraud_prediction_errors_total[5m])", "legendFormat": "errors/s"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.05}]}}}
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Requests/s over Time",
+      "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "rate(fraud_api_requests_total[1m])", "legendFormat": "{{status_code}}"}
+      ]
+    },
+    {
+      "id": 7, "type": "histogram", "title": "Fraud Probability Distribution",
+      "gridPos": {"x": 12, "y": 4, "w": 12, "h": 8},
+      "targets": [{"expr": "fraud_prediction_probability_bucket", "legendFormat": "{{le}}"}]
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Data Drift Score (PSI)",
+      "gridPos": {"x": 0, "y": 12, "w": 24, "h": 6},
+      "targets": [
+        {"expr": "fraud_feature_drift_score", "legendFormat": "{{feature_name}}"}
+      ]
+    }
+  ]
+}

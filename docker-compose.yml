@@ -1,0 +1,152 @@
+version: "3.9"
+
+services:
+  # ─── Backend (FastAPI) ───────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fraud_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MODEL_NAME=insurance_fraud_model
+      - MODEL_STAGE=Production
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./data:/app/data
+      - ./mlruns:/app/mlruns
+    depends_on:
+      - mlflow
+    networks:
+      - fraud_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ─── Frontend (Streamlit) ────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: fraud_frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - API_BASE_URL=http://backend:8000
+    depends_on:
+      - backend
+    networks:
+      - fraud_net
+    restart: unless-stopped
+
+  # ─── MLflow Tracking Server ──────────────────────────────────────────────────
+  mlflow:
+    image: python:3.11-slim
+    container_name: fraud_mlflow
+    command: >
+      bash -c "pip install mlflow boto3 --quiet &&
+               mlflow server
+               --host 0.0.0.0
+               --port 5000
+               --backend-store-uri sqlite:////mlflow/mlflow.db
+               --default-artifact-root /mlflow/artifacts"
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow
+    networks:
+      - fraud_net
+    restart: unless-stopped
+
+  # ─── Apache Airflow ──────────────────────────────────────────────────────────
+  airflow-webserver:
+    image: apache/airflow:2.8.1
+    container_name: fraud_airflow
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__SECRET_KEY=fraud_secret_key_change_in_prod
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./data:/opt/airflow/data
+      - airflow_logs:/opt/airflow/logs
+    command: >
+      bash -c "airflow db init &&
+               airflow users create --username admin --password admin
+               --firstname Admin --lastname User --role Admin
+               --email admin@example.com &&
+               airflow webserver"
+    networks:
+      - fraud_net
+    restart: unless-stopped
+
+  airflow-scheduler:
+    image: apache/airflow:2.8.1
+    container_name: fraud_airflow_scheduler
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./data:/opt/airflow/data
+      - airflow_logs:/opt/airflow/logs
+    command: airflow scheduler
+    depends_on:
+      - airflow-webserver
+    networks:
+      - fraud_net
+    restart: unless-stopped
+
+  # ─── Prometheus ──────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: fraud_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+    networks:
+      - fraud_net
+    restart: unless-stopped
+
+  # ─── Grafana ─────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: fraud_grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - fraud_net
+    restart: unless-stopped
+
+volumes:
+  mlflow_data:
+  airflow_logs:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  fraud_net:
+    driver: bridge

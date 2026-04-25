@@ -1,0 +1,31 @@
+name: insurance-fraud-detection
+
+python_env: python_env.yaml
+
+entry_points:
+  ingest:
+    command: "python src/data/ingest.py"
+
+  validate:
+    command: "python src/data/validate.py"
+
+  preprocess:
+    parameters:
+      test_size: {type: float, default: 0.2}
+      val_size: {type: float, default: 0.1}
+      random_state: {type: int, default: 42}
+    command: "python src/data/preprocess.py"
+
+  train:
+    parameters:
+      algorithm: {type: string, default: "random_forest"}
+      n_estimators: {type: int, default: 200}
+      max_depth: {type: int, default: 10}
+      threshold: {type: float, default: 0.4}
+    command: "python src/models/train.py"
+
+  evaluate:
+    command: "python src/models/evaluate.py"
+
+  main:
+    command: "dvc repro"

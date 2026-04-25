@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Data (tracked by DVC instead)
+data/raw/*.csv
+data/processed/*.pkl
+data/processed/*.json
+
+# MLflow
+mlruns/
+
+# Credentials
+.env
+kaggle.json
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Docker
+*.log

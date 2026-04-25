@@ -1,0 +1,31 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files: []
+
+scrape_configs:
+  # ── FastAPI Backend ─────────────────────────────────────────────────────────
+  - job_name: "fraud_backend"
+    static_configs:
+      - targets: ["backend:8000"]
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  # ── Prometheus self-monitoring ───────────────────────────────────────────────
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # ── MLflow (if it exposes metrics) ──────────────────────────────────────────
+  - job_name: "mlflow"
+    static_configs:
+      - targets: ["mlflow:5000"]
+    metrics_path: /metrics
+    scrape_interval: 30s
