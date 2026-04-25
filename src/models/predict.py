@@ -1,76 +1,42 @@
 """
 src/models/predict.py
 ──────────────────────
-Stateless prediction helper used by the FastAPI backend.
-Loads the model from MLflow Model Registry (or local fallback).
+Model loading and inference.
+
+MLflow 3.x uses aliases instead of stages.
+Load model via:  models:/insurance_fraud_model@champion
+instead of:      models:/insurance_fraud_model/Production  (deprecated)
 """
 
 import logging
-import os
 import pickle
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional
 
 import mlflow
+import mlflow.sklearn
 import numpy as np
-import pandas as pd
+import yaml
 
 logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[2]
+PROCESSED = ROOT / "data/processed"
+PARAMS_FILE = ROOT / "params.yaml"
 
-# ── Singleton model cache ────────────────────────────────────────────────────
 _model = None
 _preprocessor = None
 
 
-def _load_from_registry(
-    model_name: str,
-    stage: str = "Production",
-    tracking_uri: str = "http://localhost:5000",
-) -> Any:
-    """Load model from MLflow model registry."""
-    mlflow.set_tracking_uri(tracking_uri)
-    model_uri = f"models:/{model_name}/{stage}"
-    logger.info("Loading model from MLflow registry: %s", model_uri)
-    return mlflow.sklearn.load_model(model_uri)
-
-
-def _load_from_local() -> Any:
-    """Fallback: load model from local pickle."""
-    local_path = ROOT / "data/processed/model.pkl"
-    if not local_path.exists():
-        raise FileNotFoundError(f"No model found at {local_path}")
-    with open(local_path, "rb") as f:
-        return pickle.load(f)
-
-
-def _load_preprocessor() -> Any:
-    local_path = ROOT / "data/processed/preprocessor.pkl"
-    if not local_path.exists():
-        raise FileNotFoundError(f"No preprocessor found at {local_path}")
-    with open(local_path, "rb") as f:
-        return pickle.load(f)
+def load_params() -> dict:
+    with open(PARAMS_FILE) as f:
+        return yaml.safe_load(f)
 
 
 def get_model():
-    """Get the model, initializing from registry or local if needed."""
     global _model
-    if _model is not None:
-        return _model
-
-    model_name = os.getenv("MODEL_NAME", "insurance_fraud_model")
-    model_stage = os.getenv("MODEL_STAGE", "Production")
-    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
-
-    try:
-        _model = _load_from_registry(model_name, model_stage, tracking_uri)
-        logger.info("Model loaded from MLflow registry.")
-    except Exception as e:
-        logger.warning("Registry load failed (%s). Falling back to local.", e)
-        _model = _load_from_local()
-        logger.info("Model loaded from local pickle.")
-
+    if _model is None:
+        _model = _load_model()
     return _model
 
 
@@ -78,54 +44,99 @@ def get_preprocessor():
     global _preprocessor
     if _preprocessor is None:
         _preprocessor = _load_preprocessor()
-        logger.info("Preprocessor loaded.")
     return _preprocessor
 
 
-def predict(
-    features: Dict[str, Any],
-    threshold: float = 0.4,
-) -> Dict[str, Any]:
+def _load_model():
+    """Try MLflow registry first (alias), fall back to local pkl."""
+    try:
+        params = load_params()
+        mlflow.set_tracking_uri(params["mlflow"]["tracking_uri"])
+        model_name = params["mlflow"]["registered_model_name"]
+        model_alias = params["mlflow"].get("model_alias", "champion")
+
+        model_uri = f"models:/{model_name}@{model_alias}"
+        logger.info("Loading model from MLflow registry: %s", model_uri)
+        model = mlflow.sklearn.load_model(model_uri)
+        logger.info("Model loaded from MLflow registry.")
+        return model
+    except Exception as e:
+        logger.warning("Registry load failed (%s). Falling back to local.", e)
+        return _load_local_model()
+
+
+def _load_local_model():
+    model_path = PROCESSED / "model.pkl"
+    if not model_path.exists():
+        raise FileNotFoundError(
+            f"No model found at {model_path}. Run 'dvc repro' first."
+        )
+    with open(model_path, "rb") as f:
+        model = pickle.load(f)
+    logger.info("Model loaded from local pickle.")
+    return model
+
+
+def _load_preprocessor():
+    preprocessor_path = PROCESSED / "preprocessor.pkl"
+    if not preprocessor_path.exists():
+        raise FileNotFoundError(
+            f"No preprocessor found at {preprocessor_path}. Run 'dvc repro' first."
+        )
+    with open(preprocessor_path, "rb") as f:
+        preprocessor = pickle.load(f)
+    logger.info("Preprocessor loaded.")
+    return preprocessor
+
+
+def reload_model():
+    """Force reload model from registry (called by /model/reload endpoint)."""
+    global _model
+    _model = _load_model()
+    logger.info("Model reloaded.")
+
+
+def predict(features: dict, threshold: Optional[float] = None) -> dict:
     """
-    Run prediction pipeline on a single claim dict.
-    Returns fraud probability, label, and risk score.
+    Run inference on a single claim.
+
+    Args:
+        features: Raw feature dict from the API request.
+        threshold: Decision threshold. Falls back to params.yaml if None.
+
+    Returns:
+        Dict with fraud_probability, is_fraud, risk_score, risk_tier, threshold_used.
     """
+    if threshold is None:
+        threshold = load_params()["model"]["threshold"]
+
     model = get_model()
     preprocessor = get_preprocessor()
 
+    import pandas as pd
     df = pd.DataFrame([features])
+    df.replace("?", float("nan"), inplace=True)
 
-    # Apply feature engineering
+    # Apply same derived features as preprocessing
     from src.features.engineer import create_derived_features
     df = create_derived_features(df)
 
-    # Replace '?' with NaN
-    df.replace("?", np.nan, inplace=True)
-
     X = preprocessor.transform(df)
-    proba = model.predict_proba(X)[0, 1]
-    label = int(proba >= threshold)
-
-    # Risk score 0–100
+    proba = float(model.predict_proba(X)[0, 1])
+    is_fraud = proba >= threshold
     risk_score = round(proba * 100, 1)
-    risk_tier = (
-        "LOW" if risk_score < 30
-        else "MEDIUM" if risk_score < 60
-        else "HIGH"
-    )
+
+    if proba >= 0.6:
+        risk_tier = "HIGH"
+    elif proba >= 0.3:
+        risk_tier = "MEDIUM"
+    else:
+        risk_tier = "LOW"
 
     return {
-        "fraud_probability": round(float(proba), 4),
-        "is_fraud": bool(label),
+        "fraud_probability": round(proba, 4),
+        "is_fraud": bool(is_fraud),
         "risk_score": risk_score,
         "risk_tier": risk_tier,
         "threshold_used": threshold,
     }
-
-
-def reload_model() -> None:
-    """Force reload — called when a new model version is promoted."""
-    global _model, _preprocessor
-    _model = None
-    _preprocessor = None
-    logger.info("Model cache cleared — will reload on next prediction.")

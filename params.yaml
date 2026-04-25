@@ -68,6 +68,7 @@ mlflow:
   experiment_name: insurance_fraud_detection
   registered_model_name: insurance_fraud_model
   tracking_uri: http://localhost:5000
+  model_alias: champion
 
 # ─── Monitoring ──────────────────────────────────────────────────────────────
 monitoring:
