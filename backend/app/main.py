@@ -3,8 +3,9 @@ backend/app/main.py
 ────────────────────
 FastAPI application entry point.
 
-FIX: threshold is now loaded once at startup and stored in app.state,
-     so predict.py routers don't read params.yaml on every request.
+FIX: params.yaml path uses parents[2] not parents[3].
+     Inside Docker: /app/backend/app/main.py → parents[2] = /app ✓
+     Locally:       .../backend/app/main.py  → parents[2] = project root ✓
 """
 
 import logging
@@ -21,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_client import make_asgi_app
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]   # FIX: was parents[3]
 sys.path.insert(0, str(ROOT))
 
 from src.monitoring.metrics import CURRENT_THRESHOLD, MODEL_LOADED, REQUEST_COUNT, REQUEST_LATENCY
@@ -39,7 +40,7 @@ APP_START_TIME = time.time()
 async def lifespan(app: FastAPI):
     logger.info("Starting Insurance Fraud Detection API ...")
 
-    # Load threshold once — routers read from app.state.threshold
+    # Load threshold once at startup
     params_path = ROOT / "params.yaml"
     try:
         with open(params_path) as f:
@@ -49,7 +50,9 @@ async def lifespan(app: FastAPI):
         logger.info("Threshold loaded: %.2f", app.state.threshold)
     except Exception as e:
         app.state.threshold = 0.4
-        logger.warning("Could not load threshold from params.yaml (%s). Using default 0.4", e)
+        logger.warning(
+            "Could not load threshold from params.yaml (%s). Using default 0.4", e
+        )
 
     # Warm up model
     try:
@@ -68,10 +71,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Insurance Fraud Detection API",
-    description=(
-        "Binary classification API that predicts whether an insurance "
-        "claim is fraudulent. Part of DA5402 MLOps project."
-    ),
+    description="Binary classification API for insurance claim fraud detection.",
     version="1.0.0",
     lifespan=lifespan,
     docs_url="/docs",
@@ -99,13 +99,8 @@ async def metrics_middleware(request: Request, call_next):
             endpoint=request.url.path,
             status_code=response.status_code,
         ).inc()
-        logger.info(
-            "%s %s %s %.3fs",
-            request.method, request.url.path, response.status_code, duration,
-        )
         return response
     except Exception as exc:
-        duration = time.time() - start
         REQUEST_COUNT.labels(
             method=request.method, endpoint=request.url.path, status_code=500
         ).inc()

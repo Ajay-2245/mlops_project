@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # ── Install Python dependencies ───────────────────────────────────────────────
+# Build context is project root, so path is backend/requirements.txt
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -19,6 +20,8 @@ COPY backend/ ./backend/
 COPY params.yaml ./params.yaml
 
 # ── Create data directories ───────────────────────────────────────────────────
+# data/processed and data/raw are mounted as volumes at runtime
+# so we just create the empty directories here
 RUN mkdir -p data/raw data/processed mlruns
 
 # ── Non-root user for security ────────────────────────────────────────────────
@@ -29,7 +32,7 @@ USER appuser
 EXPOSE 8000
 
 # ── Health check ──────────────────────────────────────────────────────────────
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # ── Start server ──────────────────────────────────────────────────────────────

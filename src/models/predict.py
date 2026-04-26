@@ -3,12 +3,13 @@ src/models/predict.py
 ──────────────────────
 Model loading and inference.
 
-MLflow 3.x uses aliases instead of stages.
-Load model via:  models:/insurance_fraud_model@champion
-instead of:      models:/insurance_fraud_model/Production  (deprecated)
+FIX: MLflow tracking URI reads from MLFLOW_TRACKING_URI env var first
+     (set in docker-compose as http://mlflow:5000), falls back to
+     params.yaml (http://localhost:5000) for local development.
 """
 
 import logging
+import os
 import pickle
 from pathlib import Path
 from typing import Optional
@@ -33,6 +34,20 @@ def load_params() -> dict:
         return yaml.safe_load(f)
 
 
+def get_tracking_uri() -> str:
+    """
+    Read MLflow tracking URI from env var first (Docker),
+    fall back to params.yaml (local dev).
+    """
+    env_uri = os.getenv("MLFLOW_TRACKING_URI")
+    if env_uri:
+        logger.info("Using MLflow URI from environment: %s", env_uri)
+        return env_uri
+    params_uri = load_params()["mlflow"]["tracking_uri"]
+    logger.info("Using MLflow URI from params.yaml: %s", params_uri)
+    return params_uri
+
+
 def get_model():
     global _model
     if _model is None:
@@ -50,8 +65,10 @@ def get_preprocessor():
 def _load_model():
     """Try MLflow registry first (alias), fall back to local pkl."""
     try:
+        tracking_uri = get_tracking_uri()
+        mlflow.set_tracking_uri(tracking_uri)
+
         params = load_params()
-        mlflow.set_tracking_uri(params["mlflow"]["tracking_uri"])
         model_name = params["mlflow"]["registered_model_name"]
         model_alias = params["mlflow"].get("model_alias", "champion")
 
@@ -90,23 +107,13 @@ def _load_preprocessor():
 
 
 def reload_model():
-    """Force reload model from registry (called by /model/reload endpoint)."""
+    """Force reload model from registry."""
     global _model
     _model = _load_model()
     logger.info("Model reloaded.")
 
 
 def predict(features: dict, threshold: Optional[float] = None) -> dict:
-    """
-    Run inference on a single claim.
-
-    Args:
-        features: Raw feature dict from the API request.
-        threshold: Decision threshold. Falls back to params.yaml if None.
-
-    Returns:
-        Dict with fraud_probability, is_fraud, risk_score, risk_tier, threshold_used.
-    """
     if threshold is None:
         threshold = load_params()["model"]["threshold"]
 
@@ -117,7 +124,6 @@ def predict(features: dict, threshold: Optional[float] = None) -> dict:
     df = pd.DataFrame([features])
     df.replace("?", float("nan"), inplace=True)
 
-    # Apply same derived features as preprocessing
     from src.features.engineer import create_derived_features
     df = create_derived_features(df)
 

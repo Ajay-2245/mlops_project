@@ -1,8 +1,26 @@
-version: "3.9"
-
 services:
+  # ─── MLflow Tracking Server ──────────────────────────────────────────────────
+  mlflow:
+    build:
+      context: ./mlflow
+      dockerfile: Dockerfile
+    container_name: fraud_mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow
+      - ./mlruns:/app/mlruns
+    networks:
+      - fraud_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/2.0/mlflow/experiments/search?max_results=1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
-  # ── Backend (FastAPI) ──────────────────────────────────────────────────────
+  # ─── FastAPI Backend ──────────────────────────────────────────────────────────
   backend:
     build:
       context: .
@@ -15,108 +33,41 @@ services:
       - MODEL_NAME=insurance_fraud_model
       - MODEL_STAGE=Production
       - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
     volumes:
       - ./data:/app/data
       - ./mlruns:/app/mlruns
     depends_on:
-      - mlflow
+      mlflow:
+        condition: service_healthy
     networks:
       - fraud_net
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-    restart: unless-stopped
+      start_period: 30s
 
-  # ── Frontend (Streamlit) ───────────────────────────────────────────────────
+  # ─── Streamlit Frontend ───────────────────────────────────────────────────────
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: fraud_frontend
     ports:
       - "8501:8501"
     environment:
-      # Inside Docker the backend is reachable via its service name.
-      # When running Streamlit locally (outside Docker), this env var is NOT set
-      # so app.py falls back to http://localhost:8000 automatically.
       - API_BASE_URL=http://backend:8000
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - fraud_net
     restart: unless-stopped
 
-  # ── MLflow Tracking Server ──────────────────────────────────────────────────
-  mlflow:
-    image: python:3.11-slim
-    container_name: fraud_mlflow
-    command: >
-      bash -c "pip install mlflow --quiet &&
-               mlflow server
-               --host 0.0.0.0
-               --port 5000
-               --backend-store-uri sqlite:////mlflow/mlflow.db
-               --default-artifact-root /mlflow/artifacts"
-    ports:
-      - "5000:5000"
-    volumes:
-      - mlflow_data:/mlflow
-    networks:
-      - fraud_net
-    restart: unless-stopped
-
-  # ── Airflow Webserver ───────────────────────────────────────────────────────
-  airflow-webserver:
-    image: apache/airflow:2.8.1
-    container_name: fraud_airflow
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - AIRFLOW__WEBSERVER__SECRET_KEY=change_this_in_production
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./data:/opt/airflow/data
-      - ./src:/opt/airflow/src
-      - ./params.yaml:/opt/airflow/params.yaml
-      - airflow_logs:/opt/airflow/logs
-    command: >
-      bash -c "airflow db init &&
-               airflow users create
-               --username admin --password admin
-               --firstname Admin --lastname User
-               --role Admin --email admin@example.com &&
-               airflow webserver"
-    networks:
-      - fraud_net
-    restart: unless-stopped
-
-  # ── Airflow Scheduler ──────────────────────────────────────────────────────
-  airflow-scheduler:
-    image: apache/airflow:2.8.1
-    container_name: fraud_airflow_scheduler
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./data:/opt/airflow/data
-      - ./src:/opt/airflow/src
-      - ./params.yaml:/opt/airflow/params.yaml
-      - airflow_logs:/opt/airflow/logs
-    command: airflow scheduler
-    depends_on:
-      - airflow-webserver
-    networks:
-      - fraud_net
-    restart: unless-stopped
-
-  # ── Prometheus ─────────────────────────────────────────────────────────────
+  # ─── Prometheus ───────────────────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:latest
     container_name: fraud_prometheus
@@ -132,7 +83,7 @@ services:
       - fraud_net
     restart: unless-stopped
 
-  # ── Grafana ────────────────────────────────────────────────────────────────
+  # ─── Grafana ──────────────────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:latest
     container_name: fraud_grafana
@@ -153,7 +104,6 @@ services:
 
 volumes:
   mlflow_data:
-  airflow_logs:
   prometheus_data:
   grafana_data:
 

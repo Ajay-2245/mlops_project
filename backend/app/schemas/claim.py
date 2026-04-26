@@ -1,63 +1,21 @@
 """
 backend/app/schemas/claim.py
 ─────────────────────────────
-Pydantic models for request validation and response serialization.
-Updated to include property_damage column.
+Pydantic v2 schemas.
+
+FIX: Added protected_namespaces=() to suppress Pydantic warnings
+     about fields starting with 'model_' (model_name, model_stage, model_loaded).
 """
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ClaimRequest(BaseModel):
-    """Input schema for a single insurance claim prediction request."""
-
-    # Policy information
-    months_as_customer: int = Field(..., ge=0, le=600)
-    age: int = Field(..., ge=16, le=100)
-    policy_state: str
-    policy_csl: str
-    policy_deductable: int = Field(..., ge=0)
-    policy_annual_premium: float = Field(..., ge=0)
-    umbrella_limit: int = Field(default=0)
-
-    # Insured person
-    insured_sex: Literal["MALE", "FEMALE"]
-    insured_education_level: str
-    insured_occupation: str
-    insured_hobbies: Optional[str] = None
-    insured_relationship: str
-    capital_gains: float = Field(default=0, alias="capital-gains")
-    capital_loss: float = Field(default=0, alias="capital-loss")
-
-    # Incident details
-    incident_type: str
-    collision_type: Optional[str] = None
-    incident_severity: str
-    authorities_contacted: Optional[str] = None
-    incident_state: str
-    incident_city: str
-    incident_hour_of_the_day: int = Field(..., ge=0, le=23)
-    number_of_vehicles_involved: int = Field(..., ge=1, le=10)
-    property_damage: Optional[Literal["YES", "NO"]] = None   # NEW
-    bodily_injuries: int = Field(..., ge=0, le=10)
-    witnesses: int = Field(..., ge=0, le=10)
-    police_report_available: Literal["YES", "NO"]
-
-    # Claim amounts
-    total_claim_amount: float = Field(..., ge=0)
-    injury_claim: float = Field(default=0, ge=0)
-    property_claim: float = Field(default=0, ge=0)
-    vehicle_claim: float = Field(default=0, ge=0)
-
-    # Vehicle
-    auto_make: str
-    auto_year: int = Field(..., ge=1980, le=2025)
-
-    class Config:
-        populate_by_name = True
-        json_schema_extra = {
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
             "example": {
                 "months_as_customer": 36,
                 "age": 35,
@@ -92,7 +50,50 @@ class ClaimRequest(BaseModel):
                 "auto_make": "Saab",
                 "auto_year": 2012,
             }
-        }
+        },
+    )
+
+    # Policy information
+    months_as_customer: int = Field(..., ge=0, le=600)
+    age: int = Field(..., ge=16, le=100)
+    policy_state: str
+    policy_csl: str
+    policy_deductable: int = Field(..., ge=0)
+    policy_annual_premium: float = Field(..., ge=0)
+    umbrella_limit: int = Field(default=0)
+
+    # Insured person
+    insured_sex: Literal["MALE", "FEMALE"]
+    insured_education_level: str
+    insured_occupation: str
+    insured_hobbies: Optional[str] = None
+    insured_relationship: str
+    capital_gains: float = Field(default=0, alias="capital-gains")
+    capital_loss: float = Field(default=0, alias="capital-loss")
+
+    # Incident details
+    incident_type: str
+    collision_type: Optional[str] = None
+    incident_severity: str
+    authorities_contacted: Optional[str] = None
+    incident_state: str
+    incident_city: str
+    incident_hour_of_the_day: int = Field(..., ge=0, le=23)
+    number_of_vehicles_involved: int = Field(..., ge=1, le=10)
+    property_damage: Optional[Literal["YES", "NO"]] = None
+    bodily_injuries: int = Field(..., ge=0, le=10)
+    witnesses: int = Field(..., ge=0, le=10)
+    police_report_available: Literal["YES", "NO"]
+
+    # Claim amounts
+    total_claim_amount: float = Field(..., ge=0)
+    injury_claim: float = Field(default=0, ge=0)
+    property_claim: float = Field(default=0, ge=0)
+    vehicle_claim: float = Field(default=0, ge=0)
+
+    # Vehicle
+    auto_make: str
+    auto_year: int = Field(..., ge=1980, le=2025)
 
 
 class PredictionResponse(BaseModel):
@@ -117,6 +118,9 @@ class BatchPredictionResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    # protected_namespaces=() suppresses warnings for model_loaded field
+    model_config = ConfigDict(protected_namespaces=())
+
     status: Literal["healthy", "degraded", "unhealthy"]
     model_loaded: bool
     version: str
@@ -124,6 +128,9 @@ class HealthResponse(BaseModel):
 
 
 class ModelInfoResponse(BaseModel):
+    # protected_namespaces=() suppresses warnings for model_name, model_stage fields
+    model_config = ConfigDict(protected_namespaces=())
+
     model_name: str
     model_stage: str
     algorithm: str
