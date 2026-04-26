@@ -170,6 +170,7 @@ stages:
           experiment_name: insurance_fraud_detection
           registered_model_name: insurance_fraud_model
           tracking_uri: http://localhost:5000
+          model_alias: champion
         model:
           algorithm: random_forest
           n_estimators: 200
@@ -212,6 +213,7 @@ stages:
           experiment_name: insurance_fraud_detection
           registered_model_name: insurance_fraud_model
           tracking_uri: http://localhost:5000
+          model_alias: champion
         model.threshold: 0.4
     outs:
     - path: data/processed/confusion_matrix.csv

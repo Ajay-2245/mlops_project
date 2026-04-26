@@ -1,0 +1,21 @@
+                                  feature  importance
+      cat__incident_severity_Major Damage    0.124938
+      cat__incident_severity_Minor Damage    0.056939
+               cat__insured_hobbies_chess    0.048351
+        cat__incident_severity_Total Loss    0.043182
+              num__claim_to_premium_ratio    0.037651
+                       num__vehicle_claim    0.035548
+                  num__total_claim_amount    0.035501
+                       num__component_sum    0.034351
+           cat__insured_hobbies_cross-fit    0.032223
+                      num__property_claim    0.029712
+                        num__injury_claim    0.029355
+               num__policy_annual_premium    0.027079
+                  num__months_as_customer    0.026376
+                                 num__age    0.024516
+            num__incident_hour_of_the_day    0.022305
+                           num__auto_year    0.020089
+                       num__capital-gains    0.018796
+                        num__capital-loss    0.014013
+                           num__witnesses    0.009711
+cat__insured_occupation_handlers-cleaners    0.009095

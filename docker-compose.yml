@@ -1,11 +1,12 @@
 version: "3.9"
 
 services:
-  # ─── Backend (FastAPI) ───────────────────────────────────────────────────────
+
+  # ── Backend (FastAPI) ──────────────────────────────────────────────────────
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: fraud_backend
     ports:
       - "8000:8000"
@@ -28,15 +29,18 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # ─── Frontend (Streamlit) ────────────────────────────────────────────────────
+  # ── Frontend (Streamlit) ───────────────────────────────────────────────────
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
     container_name: fraud_frontend
     ports:
       - "8501:8501"
     environment:
+      # Inside Docker the backend is reachable via its service name.
+      # When running Streamlit locally (outside Docker), this env var is NOT set
+      # so app.py falls back to http://localhost:8000 automatically.
       - API_BASE_URL=http://backend:8000
     depends_on:
       - backend
@@ -44,12 +48,12 @@ services:
       - fraud_net
     restart: unless-stopped
 
-  # ─── MLflow Tracking Server ──────────────────────────────────────────────────
+  # ── MLflow Tracking Server ──────────────────────────────────────────────────
   mlflow:
     image: python:3.11-slim
     container_name: fraud_mlflow
     command: >
-      bash -c "pip install mlflow boto3 --quiet &&
+      bash -c "pip install mlflow --quiet &&
                mlflow server
                --host 0.0.0.0
                --port 5000
@@ -63,7 +67,7 @@ services:
       - fraud_net
     restart: unless-stopped
 
-  # ─── Apache Airflow ──────────────────────────────────────────────────────────
+  # ── Airflow Webserver ───────────────────────────────────────────────────────
   airflow-webserver:
     image: apache/airflow:2.8.1
     container_name: fraud_airflow
@@ -71,23 +75,27 @@ services:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - AIRFLOW__WEBSERVER__SECRET_KEY=fraud_secret_key_change_in_prod
+      - AIRFLOW__WEBSERVER__SECRET_KEY=change_this_in_production
     ports:
       - "8080:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./data:/opt/airflow/data
+      - ./src:/opt/airflow/src
+      - ./params.yaml:/opt/airflow/params.yaml
       - airflow_logs:/opt/airflow/logs
     command: >
       bash -c "airflow db init &&
-               airflow users create --username admin --password admin
-               --firstname Admin --lastname User --role Admin
-               --email admin@example.com &&
+               airflow users create
+               --username admin --password admin
+               --firstname Admin --lastname User
+               --role Admin --email admin@example.com &&
                airflow webserver"
     networks:
       - fraud_net
     restart: unless-stopped
 
+  # ── Airflow Scheduler ──────────────────────────────────────────────────────
   airflow-scheduler:
     image: apache/airflow:2.8.1
     container_name: fraud_airflow_scheduler
@@ -98,6 +106,8 @@ services:
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./data:/opt/airflow/data
+      - ./src:/opt/airflow/src
+      - ./params.yaml:/opt/airflow/params.yaml
       - airflow_logs:/opt/airflow/logs
     command: airflow scheduler
     depends_on:
@@ -106,7 +116,7 @@ services:
       - fraud_net
     restart: unless-stopped
 
-  # ─── Prometheus ──────────────────────────────────────────────────────────────
+  # ── Prometheus ─────────────────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:latest
     container_name: fraud_prometheus
@@ -122,7 +132,7 @@ services:
       - fraud_net
     restart: unless-stopped
 
-  # ─── Grafana ─────────────────────────────────────────────────────────────────
+  # ── Grafana ────────────────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:latest
     container_name: fraud_grafana
