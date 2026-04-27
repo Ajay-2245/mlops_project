@@ -2,11 +2,14 @@
 src/models/evaluate.py
 ───────────────────────
 Final evaluation on hold-out test set.
-Writes metrics JSON and confusion-matrix CSV for DVC plots.
+
+FIX: get_tracking_uri() reads MLFLOW_TRACKING_URI env var first
+     (set to http://mlflow:5000 in Docker), falls back to params.yaml.
 """
 
 import json
 import logging
+import os
 import pickle
 import sys
 from pathlib import Path
@@ -41,12 +44,26 @@ def load_params() -> dict:
         return yaml.safe_load(f)
 
 
+def get_tracking_uri(mlflow_cfg: dict) -> str:
+    """
+    Read MLflow tracking URI from env var first (Docker: http://mlflow:5000),
+    fall back to params.yaml (local dev: http://localhost:5000).
+    """
+    env_uri = os.getenv("MLFLOW_TRACKING_URI")
+    if env_uri:
+        logger.info("Using MLflow URI from environment: %s", env_uri)
+        return env_uri
+    uri = mlflow_cfg["tracking_uri"]
+    logger.info("Using MLflow URI from params.yaml: %s", uri)
+    return uri
+
+
 def main() -> None:
     params = load_params()
     threshold = params["model"]["threshold"]
     mlflow_cfg = params["mlflow"]
 
-    # ── Load artefacts ───────────────────────────────────────────────────────
+    # Load artefacts
     with open(PROCESSED / "model.pkl", "rb") as f:
         model = pickle.load(f)
     with open(PROCESSED / "X_test.pkl", "rb") as f:
@@ -56,11 +73,9 @@ def main() -> None:
 
     logger.info("Evaluating on test set — shape: %s", X_test.shape)
 
-    # ── Predictions ──────────────────────────────────────────────────────────
     proba = model.predict_proba(X_test)[:, 1]
     preds = (proba >= threshold).astype(int)
 
-    # ── Metrics ──────────────────────────────────────────────────────────────
     metrics = {
         "test_accuracy": round(float((preds == y_test).mean()), 4),
         "test_precision": round(float(precision_score(y_test, preds, zero_division=0)), 4),
@@ -75,11 +90,10 @@ def main() -> None:
 
     logger.info("Test metrics: %s", metrics)
 
-    # ── Classification report ─────────────────────────────────────────────────
     report = classification_report(y_test, preds, target_names=["Legitimate", "Fraud"])
     logger.info("\n%s", report)
 
-    # ── Confusion matrix CSV (DVC plots) ──────────────────────────────────────
+    # Confusion matrix CSV
     cm = confusion_matrix(y_test, preds)
     cm_df = pd.DataFrame({
         "actual": ["Legitimate", "Legitimate", "Fraud", "Fraud"],
@@ -88,13 +102,14 @@ def main() -> None:
     })
     cm_df.to_csv(PROCESSED / "confusion_matrix.csv", index=False)
 
-    # ── Save metrics JSON ─────────────────────────────────────────────────────
     with open(PROCESSED / "eval_metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
 
-    # ── Log to MLflow (active run from training, or new) ──────────────────────
-    mlflow.set_tracking_uri(mlflow_cfg["tracking_uri"])
+    # FIX: use env var so Docker containers connect to http://mlflow:5000
+    tracking_uri = get_tracking_uri(mlflow_cfg)
+    mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(mlflow_cfg["experiment_name"])
+
     with mlflow.start_run(run_name="evaluate_test"):
         mlflow.log_metrics(metrics)
         mlflow.log_text(report, "classification_report.txt")

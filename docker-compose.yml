@@ -10,6 +10,14 @@ services:
     volumes:
       - mlflow_data:/mlflow
       - ./mlruns:/app/mlruns
+    # FIX: Set default artifact root to the proxy scheme (mlflow-artifacts:/) 
+    # and map the physical destination to /app/mlruns
+    command: >
+      mlflow server
+      --backend-store-uri sqlite:////app/mlruns/mlflow.db
+      --default-artifact-root mlflow-artifacts:/
+      --artifacts-destination /app/mlruns
+      --host 0.0.0.0
     networks:
       - fraud_net
     restart: unless-stopped
@@ -66,6 +74,12 @@ services:
     networks:
       - fraud_net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # ─── Prometheus ───────────────────────────────────────────────────────────────
   prometheus:
@@ -102,10 +116,68 @@ services:
       - fraud_net
     restart: unless-stopped
 
+  # ─── Airflow Webserver ────────────────────────────────────────────────────────
+  airflow-webserver:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
+    container_name: fraud_airflow_webserver
+    ports:
+      - "8081:8080"
+    environment: &airflow-env
+      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+      - AIRFLOW__WEBSERVER__SECRET_KEY=fraud_secret_key
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - PROJECT_ROOT=/opt/airflow
+      - PYTHONPATH=/opt/airflow
+    volumes: &airflow-volumes
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/entrypoint.sh:/entrypoint.sh
+      - ./src:/opt/airflow/src
+      - ./params.yaml:/opt/airflow/params.yaml
+      - ./data:/opt/airflow/data
+      - ./mlruns:/opt/airflow/mlruns
+      - airflow_db:/opt/airflow
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
+    command: ["webserver"]
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    networks:
+      - fraud_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ─── Airflow Scheduler ────────────────────────────────────────────────────────
+  airflow-scheduler:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
+    container_name: fraud_airflow_scheduler
+    environment: *airflow-env
+    volumes: *airflow-volumes
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
+    command: ["scheduler"]
+    depends_on:
+      airflow-webserver:
+        condition: service_healthy
+    networks:
+      - fraud_net
+    restart: unless-stopped
+
 volumes:
   mlflow_data:
   prometheus_data:
   grafana_data:
+  airflow_db:
 
 networks:
   fraud_net:

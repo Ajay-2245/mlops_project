@@ -2,14 +2,11 @@
 src/models/train.py
 ────────────────────
 MLflow 3.x compatible training script.
-
-In MLflow 3.x, log_model() stores models in the new LoggedModel system
-(visible in Models / Model Registry sections), NOT in the run Artifacts tab.
-To show the model in Artifacts tab we also log it via log_artifact().
 """
 
 import json
 import logging
+import os
 import pickle
 import sys
 from pathlib import Path
@@ -50,6 +47,16 @@ PROCESSED = ROOT / "data/processed"
 def load_params() -> dict:
     with open(PARAMS_FILE) as f:
         return yaml.safe_load(f)
+
+
+def get_tracking_uri(mlflow_cfg: dict) -> str:
+    env_uri = os.getenv("MLFLOW_TRACKING_URI")
+    if env_uri:
+        logger.info("Using MLflow URI from environment: %s", env_uri)
+        return env_uri
+    uri = mlflow_cfg["tracking_uri"]
+    logger.info("Using MLflow URI from params.yaml: %s", uri)
+    return uri
 
 
 def load_split(name: str) -> np.ndarray:
@@ -129,8 +136,19 @@ def main() -> None:
     logger.info("Data loaded — train: %s | val: %s", X_train.shape, X_val.shape)
     logger.info("Feature names resolved: %d features", len(feature_names))
 
-    mlflow.set_tracking_uri(mlflow_cfg["tracking_uri"])
-    mlflow.set_experiment(mlflow_cfg["experiment_name"])
+    tracking_uri = get_tracking_uri(mlflow_cfg)
+    mlflow.set_tracking_uri(tracking_uri)
+    
+    # FIX: Explicitly enforce the proxy URI so Airflow doesn't try to use local paths
+    exp_name = mlflow_cfg["experiment_name"]
+    experiment = mlflow.get_experiment_by_name(exp_name)
+    if experiment is None:
+        logger.info("Creating experiment '%s' with HTTP proxy enabled", exp_name)
+        mlflow.create_experiment(
+            name=exp_name,
+            artifact_location="mlflow-artifacts:/"
+        )
+    mlflow.set_experiment(exp_name)
 
     with mlflow.start_run(run_name=f"train_{model_cfg['algorithm']}") as run:
         logger.info("MLflow run ID: %s", run.info.run_id)
@@ -154,6 +172,7 @@ def main() -> None:
         train_metrics = evaluate_split(model, X_train, y_train, threshold, "train")
         val_metrics = evaluate_split(model, X_val, y_val, threshold, "val")
         all_metrics = {**train_metrics, **val_metrics}
+        
         mlflow.log_metrics(all_metrics)
         logger.info(
             "Val F1: %.4f | Val ROC-AUC: %.4f",
@@ -163,7 +182,6 @@ def main() -> None:
         with open(PROCESSED / "train_metrics.json", "w") as f:
             json.dump(all_metrics, f, indent=2)
 
-        # ── Feature importances ──────────────────────────────────────────────
         if hasattr(model, "feature_importances_") and feature_names:
             importance_df = pd.DataFrame({
                 "feature": feature_names,
@@ -177,19 +195,13 @@ def main() -> None:
             importance_df.to_csv(PROCESSED / "feature_importances.csv", index=False)
             logger.info("Top 5 features: %s", importance_df.head(5)["feature"].tolist())
 
-        # ── Persist model locally ────────────────────────────────────────────
         model_path = PROCESSED / "model.pkl"
         with open(model_path, "wb") as f:
             pickle.dump(model, f)
 
-        # ── Artifacts tab: log pkl file directly ────────────────────────────
-        # In MLflow 3.x, log_model goes to Models section NOT Artifacts tab.
-        # log_artifact puts the file in the Artifacts tab.
         mlflow.log_artifact(str(model_path), artifact_path="model")
         logger.info("model.pkl logged to run Artifacts tab under 'model/' folder.")
 
-        # ── Models section + Model Registry: log_model with name= ───────────
-        # This is what populates the Models / Model Registry sections in MLflow 3.x.
         mlflow.sklearn.log_model(
             sk_model=model,
             name="model",
