@@ -1,7 +1,15 @@
+# 🎥 Project Demo Video
+
+[Watch the Demo](https://drive.google.com/file/d/1XYt4Xska2ZV7yPMFEpCO3o8noFyLCMbN/view?usp=sharing)
+
+---
+# Name : Prudhvi VVR Ajay Sreenivas
+
+# Roll no : DA25M023
+---
 # Insurance Fraud Detection — MLOps Pipeline
 
 End-to-end MLOps project for binary fraud classification on insurance claims.
-Built for DA5402 at IIT Madras.
 
 ## Dataset
 
