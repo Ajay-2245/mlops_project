@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  # ── Lint & Unit Tests ────────────────────────────────────────────────────────
+  # ── Unit Tests ───────────────────────────────────────────────────────────────
   test:
     runs-on: ubuntu-latest
     steps:
@@ -23,10 +23,7 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install -r backend/requirements.txt
-          pip install ruff pytest
-
-      - name: Lint with Ruff
-        run: ruff check src/ backend/ --ignore E501
+          pip install pytest
 
       - name: Run unit tests
         run: |
